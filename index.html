@@ -323,9 +323,24 @@
       const config = {
         config: {
           iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },        // Google - 182ms
-            { urls: "stun:stun1.l.google.com:19302" },       // Google 1 - 235ms
-            { urls: "stun:stun.cloudflare.com:3478" }        // Cloudflare - 321ms
+            { urls: "stun:stun.l.google.com:19302" },        // Google STUN
+            { urls: "stun:stun1.l.google.com:19302" },       // Google STUN 备用
+            // 添加免费 TURN 服务器（用于 NAT 穿透失败时中继）
+            {
+              urls: "turn:openrelay.metered.ca:80",
+              username: "openrelayproject",
+              credential: "openrelayproject"
+            },
+            {
+              urls: "turn:openrelay.metered.ca:443",
+              username: "openrelayproject",
+              credential: "openrelayproject"
+            },
+            {
+              urls: "turn:openrelay.metered.ca:443?transport=tcp",
+              username: "openrelayproject",
+              credential: "openrelayproject"
+            }
           ]
         }
       };
