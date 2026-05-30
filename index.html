@@ -173,12 +173,57 @@
       padding: 20px;
       color: #666;
     }
+
+    #debugLog {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin: 15px 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .log-entry {
+      margin: 3px 0;
+      padding: 2px 0;
+    }
+
+    .log-time {
+      color: #858585;
+    }
+
+    .log-info {
+      color: #4EC9B0;
+    }
+
+    .log-success {
+      color: #4CAF50;
+    }
+
+    .log-error {
+      color: #f44336;
+    }
+
+    .log-warning {
+      color: #FF9800;
+    }
   </style>
 </head>
 
 <body>
   <h2>🔗 WebRTC P2P（PeerJS）</h2>
   <p style="color: #666; font-size: 14px;">使用 PeerJS 公共服务器，只需输入对方 ID 即可连接</p>
+
+  <div class="section">
+    <h3>🐛 调试日志</h3>
+    <div id="debugLog"></div>
+    <button onclick="document.getElementById('debugLog').innerHTML = ''; addDebugLog('info', '日志已清空');" style="background: #666;">🗑️ 清空日志</button>
+  </div>
 
   <div class="section">
     <h3>连接状态</h3>
@@ -249,23 +294,52 @@
     let isVideoEnabled = true;
     let isVideoCall = false;
 
+    // 调试日志函数
+    function addDebugLog(level, message, data = null) {
+      const debugLog = document.getElementById('debugLog');
+      const time = new Date().toLocaleTimeString();
+      const logClass = `log-${level}`;
+
+      let logText = `[${time}] [${level.toUpperCase()}] ${message}`;
+      if (data) {
+        logText += '\n' + JSON.stringify(data, null, 2);
+      }
+
+      const logEntry = document.createElement('div');
+      logEntry.className = `log-entry ${logClass}`;
+      logEntry.textContent = logText;
+
+      debugLog.appendChild(logEntry);
+      debugLog.scrollTop = debugLog.scrollHeight;
+
+      // 同时输出到控制台
+      console.log(`[${level.toUpperCase()}]`, message, data || '');
+    }
+
     // 初始化 PeerJS
     function initPeer() {
-      // 使用 PeerJS 公共服务器
-      peer = new Peer({
+      addDebugLog('info', '开始初始化 PeerJS...');
+
+      const config = {
         config: {
           iceServers: [
-            { urls: "stun:stun.voipstunt.com:3478" },
-            { urls: "stun:stun.ekiga.net:3478" },
-            { urls: "stun:openrelay.metered.ca:80" },
-            { urls: "stun:stun.l.google.com:19302" }
+            { urls: "stun:stun.l.google.com:19302" },        // Google - 182ms
+            { urls: "stun:stun1.l.google.com:19302" },       // Google 1 - 235ms
+            { urls: "stun:stun.cloudflare.com:3478" }        // Cloudflare - 321ms
           ]
-
         }
-      });
+      };
+
+      addDebugLog('info', 'PeerJS 配置', config);
+
+      // 使用 PeerJS 公共服务器
+      peer = new Peer(config);
+
+      addDebugLog('info', '正在连接到 PeerJS 信令服务器...');
 
       peer.on('open', (id) => {
         myId = id;
+        addDebugLog('success', `✅ 成功连接到信令服务器，获得 ID: ${id}`);
         document.getElementById('myIdDisplay').innerHTML = `<div class="my-id-value">${id}</div>`;
         document.getElementById('copyIdBtn').style.display = 'inline-block';
         document.getElementById('showQrBtn').style.display = 'inline-block';
@@ -275,12 +349,14 @@
       });
 
       peer.on('connection', (connection) => {
+        addDebugLog('info', `收到来自 ${connection.peer} 的连接请求`);
         conn = connection;
         setupConnection(conn);
         addChatMessage('系统', `收到来自 ${connection.peer} 的连接请求`);
       });
 
       peer.on('call', (call) => {
+        addDebugLog('info', `收到来自 ${call.peer} 的通话请求`, { metadata: call.metadata });
         addChatMessage('系统', '收到来电...');
         updateCallStatus('收到来电，正在接听...');
 
@@ -288,11 +364,13 @@
         const isIncomingVideoCall = call.metadata && call.metadata.video;
 
         // 获取本地音频流并接听
+        addDebugLog('info', '正在获取媒体设备权限...', { audio: true, video: isIncomingVideoCall });
         navigator.mediaDevices.getUserMedia({
           audio: true,
           video: isIncomingVideoCall
         })
           .then((stream) => {
+            addDebugLog('success', '✅ 成功获取媒体流');
             localStream = stream;
             isVideoCall = isIncomingVideoCall;
 
@@ -301,11 +379,13 @@
               document.getElementById('localVideo').srcObject = stream;
             }
 
+            addDebugLog('info', '正在应答通话...');
             call.answer(stream);
             currentCall = call;
             setupCall(call);
           })
           .catch((err) => {
+            addDebugLog('error', `❌ 获取媒体权限失败: ${err.name} - ${err.message}`, err);
             console.error('无法获取媒体权限:', err);
             addChatMessage('系统', '无法获取媒体权限，请检查浏览器设置');
             call.close();
@@ -313,24 +393,41 @@
       });
 
       peer.on('error', (err) => {
+        addDebugLog('error', `❌ PeerJS 错误: ${err.type}`, {
+          type: err.type,
+          message: err.message,
+          stack: err.stack
+        });
         console.error('PeerJS 错误:', err);
         if (err.type === 'peer-unavailable') {
           alert('对方不在线或 ID 不存在');
           updateStatus('连接失败');
+        } else if (err.type === 'network') {
+          addDebugLog('error', '网络错误：无法连接到信令服务器，请检查网络连接');
+          addChatMessage('系统', `网络错误: ${err.message}`);
+        } else if (err.type === 'server-error') {
+          addDebugLog('error', '服务器错误：信令服务器返回错误');
+          addChatMessage('系统', `服务器错误: ${err.message}`);
         } else {
           addChatMessage('系统', `错误: ${err.type}`);
         }
       });
 
       peer.on('disconnected', () => {
+        addDebugLog('warning', '⚠️ 与信令服务器断开连接');
         addChatMessage('系统', '与信令服务器断开连接');
         updateStatus('已断开');
+      });
+
+      peer.on('close', () => {
+        addDebugLog('warning', '⚠️ Peer 连接已关闭');
       });
     }
 
     // 连接到对方
     document.getElementById('connectBtn').addEventListener('click', () => {
       const peerId = document.getElementById('peerIdInput').value.trim();
+      addDebugLog('info', `尝试连接到对方 ID: ${peerId}`);
 
       if (!peerId) {
         alert('请输入对方的 ID');
@@ -346,16 +443,21 @@
       addChatMessage('系统', `正在连接到 ${peerId}...`);
 
       // 创建连接
+      addDebugLog('info', '正在创建数据连接...', { peerId, reliable: true });
       conn = peer.connect(peerId, {
         reliable: true
       });
 
+      addDebugLog('info', '数据连接对象已创建，等待打开...');
       setupConnection(conn);
     });
 
     // 设置连接
     function setupConnection(connection) {
+      addDebugLog('info', '设置连接事件监听器...', { peer: connection.peer });
+
       connection.on('open', () => {
+        addDebugLog('success', `✅ 数据连接已建立，对方 ID: ${connection.peer}`);
         updateStatus('✅ 已连接');
         addChatMessage('系统', '连接成功！可以开始聊天了');
         document.getElementById('messageInput').disabled = false;
@@ -366,10 +468,12 @@
       });
 
       connection.on('data', (data) => {
+        addDebugLog('info', `收到数据: ${data}`);
         addChatMessage('对方', data);
       });
 
       connection.on('close', () => {
+        addDebugLog('warning', '⚠️ 数据连接已关闭');
         updateStatus('连接已关闭');
         addChatMessage('系统', '连接已关闭');
         document.getElementById('messageInput').disabled = true;
@@ -383,15 +487,27 @@
       });
 
       connection.on('error', (err) => {
+        addDebugLog('error', `❌ 数据连接错误: ${err.type || err.message}`, err);
         console.error('连接错误:', err);
         addChatMessage('系统', `连接错误: ${err}`);
         updateStatus('连接失败');
+      });
+
+      connection.on('iceStateChanged', (state) => {
+        addDebugLog('info', `ICE 状态变化: ${state}`);
       });
     }
 
     // 设置通话
     function setupCall(call) {
+      addDebugLog('info', '设置通话事件监听器...', { peer: call.peer });
+
       call.on('stream', (remoteStream) => {
+        addDebugLog('success', `✅ 收到远程媒体流`, {
+          audioTracks: remoteStream.getAudioTracks().length,
+          videoTracks: remoteStream.getVideoTracks().length
+        });
+
         if (isVideoCall) {
           const remoteVideo = document.getElementById('remoteVideo');
           remoteVideo.srcObject = remoteStream;
@@ -415,17 +531,35 @@
       });
 
       call.on('close', () => {
+        addDebugLog('warning', '⚠️ 通话已关闭');
         updateCallStatus('通话已结束');
         addChatMessage('系统', '通话已结束');
         cleanupCall();
       });
 
       call.on('error', (err) => {
+        addDebugLog('error', `❌ 通话错误: ${err.type}`, err);
         console.error('通话错误:', err);
         addChatMessage('系统', `通话错误: ${err.type}`);
         updateCallStatus('通话失败');
         cleanupCall();
       });
+
+      // 监听 ICE 连接状态
+      if (call.peerConnection) {
+        call.peerConnection.oniceconnectionstatechange = () => {
+          const state = call.peerConnection.iceConnectionState;
+          addDebugLog('info', `ICE 连接状态: ${state}`);
+          if (state === 'failed' || state === 'disconnected') {
+            addDebugLog('error', `❌ ICE 连接失败或断开: ${state}`);
+          }
+        };
+
+        call.peerConnection.onicegatheringstatechange = () => {
+          const state = call.peerConnection.iceGatheringState;
+          addDebugLog('info', `ICE 收集状态: ${state}`);
+        };
+      }
     }
 
     // 显示视频UI
@@ -450,7 +584,10 @@
 
     // 开始通话
     function startCall(withVideo) {
+      addDebugLog('info', `开始${withVideo ? '视频' : '语音'}通话...`);
+
       if (!conn || !conn.open) {
+        addDebugLog('error', '❌ 数据连接未建立，无法发起通话');
         alert('请先建立连接');
         return;
       }
@@ -458,11 +595,17 @@
       isVideoCall = withVideo;
       updateCallStatus(withVideo ? '正在获取摄像头和麦克风权限...' : '正在获取麦克风权限...');
 
+      addDebugLog('info', '正在请求媒体设备权限...', { audio: true, video: withVideo });
       navigator.mediaDevices.getUserMedia({
         audio: true,
         video: withVideo
       })
         .then((stream) => {
+          addDebugLog('success', '✅ 成功获取本地媒体流', {
+            audioTracks: stream.getAudioTracks().length,
+            videoTracks: stream.getVideoTracks().length
+          });
+
           localStream = stream;
 
           if (withVideo) {
@@ -473,6 +616,7 @@
           updateCallStatus('正在呼叫...');
           addChatMessage('系统', withVideo ? '正在发起视频通话...' : '正在发起语音通话...');
 
+          addDebugLog('info', `正在呼叫对方 ${conn.peer}...`, { metadata: { video: withVideo } });
           const call = peer.call(conn.peer, stream, {
             metadata: { video: withVideo }
           });
@@ -480,6 +624,7 @@
           setupCall(call);
         })
         .catch((err) => {
+          addDebugLog('error', `❌ 获取媒体权限失败: ${err.name} - ${err.message}`, err);
           console.error('无法获取媒体权限:', err);
           alert('无法获取媒体权限，请检查浏览器设置');
           updateCallStatus('');
