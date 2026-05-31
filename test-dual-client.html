@@ -4,11 +4,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC 双客户端测试</title>
+  <title>WebRTC 双客户端完整测试</title>
   <style>
     body {
       font-family: sans-serif;
       margin: 20px;
+      background: #f5f5f5;
     }
 
     .container {
@@ -22,10 +23,12 @@
       border: 2px solid #ccc;
       padding: 15px;
       border-radius: 8px;
+      background: white;
     }
 
     .client.active {
       border-color: #4CAF50;
+      box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
     }
 
     button {
@@ -36,12 +39,21 @@
       border-radius: 5px;
       background: #4CAF50;
       color: white;
+      font-size: 14px;
     }
 
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
       background: #ccc;
+    }
+
+    button.danger {
+      background: #f44336;
+    }
+
+    button.warning {
+      background: #ff9800;
     }
 
     .log {
@@ -51,7 +63,7 @@
       border-radius: 5px;
       font-family: monospace;
       font-size: 11px;
-      max-height: 300px;
+      max-height: 200px;
       overflow-y: auto;
       white-space: pre-wrap;
       margin-top: 10px;
@@ -80,9 +92,11 @@
       color: white;
     }
 
-    input {
-      padding: 5px;
+    input[type="text"] {
+      padding: 8px;
       margin: 5px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
     }
 
     .room-info {
@@ -97,15 +111,108 @@
       font-weight: bold;
       color: #1976D2;
     }
+
+    .message-section {
+      margin-top: 15px;
+      padding: 10px;
+      background: #f9f9f9;
+      border-radius: 5px;
+    }
+
+    .message-history {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      max-height: 150px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .message-item {
+      padding: 5px;
+      margin: 3px 0;
+      border-radius: 3px;
+    }
+
+    .message-item.sent {
+      background: #e3f2fd;
+      text-align: right;
+    }
+
+    .message-item.received {
+      background: #f1f8e9;
+      text-align: left;
+    }
+
+    .message-time {
+      font-size: 10px;
+      color: #666;
+      margin-left: 5px;
+    }
+
+    .audio-section {
+      margin-top: 15px;
+      padding: 10px;
+      background: #fff3e0;
+      border-radius: 5px;
+    }
+
+    .audio-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .audio-status {
+      padding: 5px 10px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .audio-status.active {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .audio-status.inactive {
+      background: #ccc;
+      color: #666;
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .section-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #333;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 5px;
+      margin-top: 5px;
+    }
+
+    .input-group input {
+      flex: 1;
+      margin: 0;
+    }
   </style>
 </head>
 
 <body>
-  <h2>🔗 WebRTC 双客户端本地测试</h2>
+  <h2>🔗 WebRTC 双客户端完整测试（消息 + 语音）</h2>
 
   <div style="margin-bottom: 20px;">
     <button id="autoTestBtn">🚀 自动测试（创建房间并连接）</button>
-    <button id="resetBtn" style="background: #f44336;">🔄 重置</button>
+    <button id="resetBtn" class="danger">🔄 重置全部</button>
   </div>
 
   <div class="container">
@@ -117,7 +224,32 @@
         房间号: <span class="room-id" id="roomIdA"></span>
       </div>
       <button id="createRoomA">创建房间</button>
-      <button id="sendMsgA" disabled>发送测试消息</button>
+
+      <!-- 消息功能 -->
+      <div class="message-section">
+        <div class="section-title">📨 消息测试</div>
+        <div class="message-history" id="messagesA"></div>
+        <div class="input-group">
+          <input type="text" id="msgInputA" placeholder="输入自定义消息..." disabled>
+          <button id="sendMsgA" disabled>发送</button>
+        </div>
+        <div style="margin-top: 5px;">
+          <button id="sendJsonA" disabled style="font-size: 12px;">发送 JSON</button>
+          <button id="sendEmojiA" disabled style="font-size: 12px;">发送 Emoji</button>
+        </div>
+      </div>
+
+      <!-- 语音功能 -->
+      <div class="audio-section">
+        <div class="section-title">🎤 语音通话</div>
+        <div class="audio-status inactive" id="audioStatusA">未启动</div>
+        <div class="audio-controls">
+          <button id="startAudioA" style="background: #2196F3;">开启麦克风</button>
+          <button id="muteA" disabled class="warning">静音</button>
+        </div>
+        <audio id="remoteAudioA" autoplay></audio>
+      </div>
+
       <div class="log" id="logA"></div>
     </div>
 
@@ -127,7 +259,32 @@
       <div class="status waiting" id="statusB">等待操作</div>
       <input type="text" id="roomInputB" placeholder="房间号" style="width: 100px;">
       <button id="joinRoomB">加入房间</button>
-      <button id="sendMsgB" disabled>发送测试消息</button>
+
+      <!-- 消息功能 -->
+      <div class="message-section">
+        <div class="section-title">📨 消息测试</div>
+        <div class="message-history" id="messagesB"></div>
+        <div class="input-group">
+          <input type="text" id="msgInputB" placeholder="输入自定义消息..." disabled>
+          <button id="sendMsgB" disabled>发送</button>
+        </div>
+        <div style="margin-top: 5px;">
+          <button id="sendJsonB" disabled style="font-size: 12px;">发送 JSON</button>
+          <button id="sendEmojiB" disabled style="font-size: 12px;">发送 Emoji</button>
+        </div>
+      </div>
+
+      <!-- 语音功能 -->
+      <div class="audio-section">
+        <div class="section-title">🎤 语音通话</div>
+        <div class="audio-status inactive" id="audioStatusB">未启动</div>
+        <div class="audio-controls">
+          <button id="startAudioB" style="background: #2196F3;">开启麦克风</button>
+          <button id="muteB" disabled class="warning">静音</button>
+        </div>
+        <audio id="remoteAudioB" autoplay></audio>
+      </div>
+
       <div class="log" id="logB"></div>
     </div>
   </div>
@@ -137,7 +294,6 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 
   <script>
-    // Firebase 配置
     const firebaseConfig = {
       apiKey: "AIzaSyB1ohgJExMps3YwIbTvU5GKJVTOGNxqWHg",
       authDomain: "webrtc-f1c77.firebaseapp.com",
@@ -159,16 +315,20 @@
       ]
     };
 
-    // 客户端类
     class WebRTCClient {
-      constructor(name, logElementId, statusElementId) {
+      constructor(name, logElementId, statusElementId, messagesElementId, audioStatusElementId, remoteAudioElementId) {
         this.name = name;
         this.logElement = document.getElementById(logElementId);
         this.statusElement = document.getElementById(statusElementId);
+        this.messagesElement = document.getElementById(messagesElementId);
+        this.audioStatusElement = document.getElementById(audioStatusElementId);
+        this.remoteAudioElement = document.getElementById(remoteAudioElementId);
         this.pc = null;
         this.roomRef = null;
         this.isOfferer = false;
         this.dataChannel = null;
+        this.localStream = null;
+        this.isMuted = false;
       }
 
       log(message, data = null) {
@@ -187,11 +347,24 @@
         this.statusElement.className = `status ${type}`;
       }
 
+      addMessage(text, type = 'received') {
+        const time = new Date().toLocaleTimeString();
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message-item ${type}`;
+        msgDiv.innerHTML = `<span>${text}</span><span class="message-time">${time}</span>`;
+        this.messagesElement.appendChild(msgDiv);
+        this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
+      }
+
+      updateAudioStatus(text, active = false) {
+        this.audioStatusElement.textContent = text;
+        this.audioStatusElement.className = `audio-status ${active ? 'active' : 'inactive'}`;
+      }
+
       createPeerConnection() {
         this.log('创建 PeerConnection');
         this.pc = new RTCPeerConnection(configuration);
 
-        // ICE 候选
         this.pc.onicecandidate = (event) => {
           if (event.candidate && this.roomRef) {
             this.log('生成 ICE 候选', {
@@ -207,17 +380,14 @@
           }
         };
 
-        // ICE 连接状态
         this.pc.oniceconnectionstatechange = () => {
           this.log('ICE 连接状态: ' + this.pc.iceConnectionState);
         };
 
-        // ICE 收集状态
         this.pc.onicegatheringstatechange = () => {
           this.log('ICE 收集状态: ' + this.pc.iceGatheringState);
         };
 
-        // 连接状态
         this.pc.onconnectionstatechange = () => {
           this.log('连接状态: ' + this.pc.connectionState);
           this.updateStatus(`连接状态: ${this.pc.connectionState}`);
@@ -231,9 +401,17 @@
           }
         };
 
-        // 信令状态
         this.pc.onsignalingstatechange = () => {
           this.log('信令状态: ' + this.pc.signalingState);
+        };
+
+        // 接收远程音频轨道
+        this.pc.ontrack = (event) => {
+          this.log('收到远程音频轨道', { kind: event.track.kind });
+          if (event.track.kind === 'audio') {
+            this.remoteAudioElement.srcObject = event.streams[0];
+            this.log('✅ 远程音频已连接');
+          }
         };
 
         // 数据通道
@@ -253,20 +431,78 @@
       setupDataChannel() {
         this.dataChannel.onopen = () => {
           this.log('✅ 数据通道已打开');
-          document.getElementById(`sendMsg${this.name === '客户端 A' ? 'A' : 'B'}`).disabled = false;
+          this.enableMessageControls(true);
         };
 
         this.dataChannel.onmessage = (e) => {
           this.log('收到消息: ' + e.data);
+          this.addMessage(e.data, 'received');
         };
 
         this.dataChannel.onclose = () => {
           this.log('数据通道已关闭');
+          this.enableMessageControls(false);
         };
 
         this.dataChannel.onerror = (err) => {
           this.log('数据通道错误: ' + err);
         };
+      }
+
+      enableMessageControls(enabled) {
+        const suffix = this.name === '客户端 A' ? 'A' : 'B';
+        document.getElementById(`msgInput${suffix}`).disabled = !enabled;
+        document.getElementById(`sendMsg${suffix}`).disabled = !enabled;
+        document.getElementById(`sendJson${suffix}`).disabled = !enabled;
+        document.getElementById(`sendEmoji${suffix}`).disabled = !enabled;
+      }
+
+      async startAudio() {
+        try {
+          this.log('请求麦克风权限...');
+          this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          this.log('✅ 麦克风已开启');
+          this.updateAudioStatus('🎤 麦克风已开启', true);
+
+          if (this.pc) {
+            this.localStream.getTracks().forEach(track => {
+              this.pc.addTrack(track, this.localStream);
+              this.log('音频轨道已添加到 PeerConnection');
+            });
+          }
+
+          const suffix = this.name === '客户端 A' ? 'A' : 'B';
+          document.getElementById(`startAudio${suffix}`).disabled = true;
+          document.getElementById(`mute${suffix}`).disabled = false;
+
+          return true;
+        } catch (err) {
+          this.log('❌ 麦克风开启失败: ' + err.message);
+          alert('无法访问麦克风: ' + err.message);
+          return false;
+        }
+      }
+
+      toggleMute() {
+        if (!this.localStream) return;
+
+        this.isMuted = !this.isMuted;
+        this.localStream.getAudioTracks().forEach(track => {
+          track.enabled = !this.isMuted;
+        });
+
+        const suffix = this.name === '客户端 A' ? 'A' : 'B';
+        const muteBtn = document.getElementById(`mute${suffix}`);
+
+        if (this.isMuted) {
+          this.log('🔇 已静音');
+          this.updateAudioStatus('🔇 已静音', false);
+          muteBtn.textContent = '取消静音';
+        } else {
+          this.log('🔊 取消静音');
+          this.updateAudioStatus('🎤 麦克风已开启', true);
+          muteBtn.textContent = '静音';
+        }
       }
 
       async createRoom(roomId) {
@@ -289,7 +525,6 @@
 
         this.updateStatus('等待对方加入');
 
-        // 监听 answer
         this.roomRef.child('answer').on('value', async (snapshot) => {
           const answer = snapshot.val();
           if (answer && !this.pc.currentRemoteDescription) {
@@ -300,7 +535,6 @@
           }
         });
 
-        // 监听对方的 ICE 候选
         this.roomRef.child('calleeCandidates').on('child_added', async (snapshot) => {
           const candidate = snapshot.val();
           if (candidate) {
@@ -322,7 +556,6 @@
 
         this.createPeerConnection();
 
-        // 获取 offer
         this.log('等待 Offer');
         const offerSnapshot = await this.roomRef.child('offer').get();
         const offer = offerSnapshot.val();
@@ -350,7 +583,6 @@
 
         this.updateStatus('正在建立连接...');
 
-        // 监听对方的 ICE 候选
         this.roomRef.child('callerCandidates').on('child_added', async (snapshot) => {
           const candidate = snapshot.val();
           if (candidate) {
@@ -369,12 +601,18 @@
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
           this.dataChannel.send(msg);
           this.log('发送消息: ' + msg);
+          this.addMessage(msg, 'sent');
         } else {
           this.log('❌ 数据通道未打开');
+          alert('数据通道未打开');
         }
       }
 
       cleanup() {
+        if (this.localStream) {
+          this.localStream.getTracks().forEach(track => track.stop());
+          this.localStream = null;
+        }
         if (this.pc) {
           this.pc.close();
           this.pc = null;
@@ -385,17 +623,22 @@
         }
         this.dataChannel = null;
         this.logElement.innerHTML = '';
+        this.messagesElement.innerHTML = '';
         this.updateStatus('等待操作');
+        this.updateAudioStatus('未启动', false);
+        this.enableMessageControls(false);
+
+        const suffix = this.name === '客户端 A' ? 'A' : 'B';
+        document.getElementById(`startAudio${suffix}`).disabled = false;
+        document.getElementById(`mute${suffix}`).disabled = true;
       }
     }
 
-    // 创建两个客户端实例
-    const clientA = new WebRTCClient('客户端 A', 'logA', 'statusA');
-    const clientB = new WebRTCClient('客户端 B', 'logB', 'statusB');
+    const clientA = new WebRTCClient('客户端 A', 'logA', 'statusA', 'messagesA', 'audioStatusA', 'remoteAudioA');
+    const clientB = new WebRTCClient('客户端 B', 'logB', 'statusB', 'messagesB', 'audioStatusB', 'remoteAudioB');
 
     let currentRoomId = null;
 
-    // 生成房间号
     function generateRoomId() {
       return Math.random().toString(36).substring(2, 8).toUpperCase();
     }
@@ -426,35 +669,97 @@
     document.getElementById('autoTestBtn').addEventListener('click', async () => {
       console.log('开始自动测试...');
 
-      // 重置
       clientA.cleanup();
       clientB.cleanup();
 
-      // 生成房间号
       currentRoomId = generateRoomId();
       document.getElementById('roomIdA').textContent = currentRoomId;
       document.getElementById('roomInfoA').style.display = 'block';
       document.getElementById('roomInputB').value = currentRoomId;
 
-      // 客户端 A 创建房间
       console.log('客户端 A 创建房间...');
       await clientA.createRoom(currentRoomId);
 
-      // 等待 2 秒
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // 客户端 B 加入房间
       console.log('客户端 B 加入房间...');
       await clientB.joinRoom(currentRoomId);
     });
 
-    // 发送消息
+    // 客户端 A 消息功能
     document.getElementById('sendMsgA').addEventListener('click', () => {
-      clientA.sendMessage('Hello from A at ' + new Date().toLocaleTimeString());
+      const input = document.getElementById('msgInputA');
+      const msg = input.value.trim();
+      if (msg) {
+        clientA.sendMessage(msg);
+        input.value = '';
+      }
     });
 
+    document.getElementById('msgInputA').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('sendMsgA').click();
+      }
+    });
+
+    document.getElementById('sendJsonA').addEventListener('click', () => {
+      const jsonMsg = JSON.stringify({
+        type: 'test',
+        data: { value: 123, timestamp: Date.now() },
+        from: 'Client A'
+      });
+      clientA.sendMessage(jsonMsg);
+    });
+
+    document.getElementById('sendEmojiA').addEventListener('click', () => {
+      clientA.sendMessage('👋 你好！🎉🚀💻');
+    });
+
+    // 客户端 B 消息功能
     document.getElementById('sendMsgB').addEventListener('click', () => {
-      clientB.sendMessage('Hello from B at ' + new Date().toLocaleTimeString());
+      const input = document.getElementById('msgInputB');
+      const msg = input.value.trim();
+      if (msg) {
+        clientB.sendMessage(msg);
+        input.value = '';
+      }
+    });
+
+    document.getElementById('msgInputB').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('sendMsgB').click();
+      }
+    });
+
+    document.getElementById('sendJsonB').addEventListener('click', () => {
+      const jsonMsg = JSON.stringify({
+        type: 'test',
+        data: { value: 456, timestamp: Date.now() },
+        from: 'Client B'
+      });
+      clientB.sendMessage(jsonMsg);
+    });
+
+    document.getElementById('sendEmojiB').addEventListener('click', () => {
+      clientB.sendMessage('👍 收到！✨🎵🔥');
+    });
+
+    // 客户端 A 语音功能
+    document.getElementById('startAudioA').addEventListener('click', async () => {
+      await clientA.startAudio();
+    });
+
+    document.getElementById('muteA').addEventListener('click', () => {
+      clientA.toggleMute();
+    });
+
+    // 客户端 B 语音功能
+    document.getElementById('startAudioB').addEventListener('click', async () => {
+      await clientB.startAudio();
+    });
+
+    document.getElementById('muteB').addEventListener('click', () => {
+      clientB.toggleMute();
     });
 
     // 重置
@@ -465,8 +770,6 @@
       document.getElementById('roomInputB').value = '';
       document.getElementById('clientA').classList.remove('active');
       document.getElementById('clientB').classList.remove('active');
-      document.getElementById('sendMsgA').disabled = true;
-      document.getElementById('sendMsgB').disabled = true;
     });
   </script>
 </body>
