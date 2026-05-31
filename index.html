@@ -310,6 +310,33 @@
       return Math.random().toString(36).substring(2, 8).toUpperCase();
     }
 
+    // 等待 ICE 候选收集完成
+    function waitForIceCandidates() {
+      return new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          log('ICE 收集状态已经是 complete');
+          resolve();
+        } else {
+          log('等待 ICE 收集完成，当前状态: ' + pc.iceGatheringState);
+          const checkGatheringState = () => {
+            log('ICE 收集状态变化: ' + pc.iceGatheringState);
+            if (pc.iceGatheringState === 'complete') {
+              pc.removeEventListener('icegatheringstatechange', checkGatheringState);
+              resolve();
+            }
+          };
+          pc.addEventListener('icegatheringstatechange', checkGatheringState);
+
+          // 超时保护（10秒）
+          setTimeout(() => {
+            log('ICE 收集超时，强制继续');
+            pc.removeEventListener('icegatheringstatechange', checkGatheringState);
+            resolve();
+          }, 10000);
+        }
+      });
+    }
+
     // 创建房间
     document.getElementById('createRoomBtn').addEventListener('click', async () => {
       roomId = generateRoomId();
@@ -361,8 +388,15 @@
         log('作为发起端创建 offer');
         // 发起端：创建 offer
         const offer = await pc.createOffer();
+        log('Offer 创建完成，准备设置本地描述');
         await pc.setLocalDescription(offer);
+        log('本地描述已设置，ICE 收集状态: ' + pc.iceGatheringState);
         log('Offer 创建成功', { type: offer.type });
+
+        // 等待 ICE 候选收集
+        log('等待 ICE 候选收集...');
+        await waitForIceCandidates();
+        log('ICE 候选收集完成，准备写入 Firebase');
 
         await roomRef.child('offer').set({
           type: offer.type,
@@ -401,9 +435,17 @@
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         log('Offer 设置成功');
 
+        log('创建 Answer');
         const answer = await pc.createAnswer();
+        log('Answer 创建完成，准备设置本地描述');
         await pc.setLocalDescription(answer);
+        log('本地描述已设置，ICE 收集状态: ' + pc.iceGatheringState);
         log('Answer 创建成功', { type: answer.type });
+
+        // 等待 ICE 候选收集
+        log('等待 ICE 候选收集...');
+        await waitForIceCandidates();
+        log('ICE 候选收集完成，准备写入 Firebase');
 
         await roomRef.child('answer').set({
           type: answer.type,
