@@ -1,5 +1,4 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously } from "firebase/auth";
 import {
   getDatabase,
   ref,
@@ -33,7 +32,6 @@ const iceServers = {
 };
 
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 const db = getDatabase(app);
 
 let uid = "";
@@ -77,8 +75,7 @@ const els = {
 async function init() {
   try {
     updateStatus("正在匿名登录...");
-    const { user } = await signInAnonymously(auth);
-    uid = user.uid;
+    uid = getLocalUid();
 
     const urlParams = new URLSearchParams(window.location.search);
     const incomingRoomId = urlParams.get("id");
@@ -497,6 +494,16 @@ function generateRoomId() {
   const bytes = new Uint8Array(12);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function getLocalUid() {
+  const storageKey = "xinling_uid";
+  const existingUid = localStorage.getItem(storageKey);
+  if (existingUid) return existingUid;
+
+  const nextUid = crypto.randomUUID ? crypto.randomUUID() : generateRoomId();
+  localStorage.setItem(storageKey, nextUid);
+  return nextUid;
 }
 
 function showVideoUI() {
