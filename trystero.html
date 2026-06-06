@@ -66,6 +66,20 @@
       flex-wrap: wrap;
     }
 
+    .panel-title {
+      margin: 0 0 12px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .item.wide {
+      grid-column: 1 / -1;
+    }
+
+    .muted {
+      color: #64748b;
+    }
+
     input {
       flex: 1 1 280px;
       min-width: 0;
@@ -140,6 +154,64 @@
     </section>
 
     <section class="panel">
+      <h2 class="panel-title">连接详情</h2>
+      <div class="grid">
+        <div class="item">
+          <div class="label">连接方式</div>
+          <div class="value" id="connectionRoute">等待连接</div>
+        </div>
+        <div class="item">
+          <div class="label">浏览器 TURN 配置</div>
+          <div class="value" id="turnConfigStatus">-</div>
+        </div>
+        <div class="item">
+          <div class="label">ICE / PeerConnection</div>
+          <div class="value" id="iceState">-</div>
+        </div>
+        <div class="item">
+          <div class="label">RTT</div>
+          <div class="value" id="rtt">-</div>
+        </div>
+        <div class="item">
+          <div class="label">可用上行带宽</div>
+          <div class="value" id="availableBitrate">-</div>
+        </div>
+        <div class="item">
+          <div class="label">当前速度</div>
+          <div class="value" id="transferRate">-</div>
+        </div>
+        <div class="item">
+          <div class="label">累计流量</div>
+          <div class="value" id="totalBytes">-</div>
+        </div>
+        <div class="item">
+          <div class="label">DataChannel</div>
+          <div class="value" id="dataChannel">-</div>
+        </div>
+        <div class="item">
+          <div class="label">候选对</div>
+          <div class="value" id="candidatePair">-</div>
+        </div>
+        <div class="item wide">
+          <div class="label">本地候选</div>
+          <div class="value" id="localCandidate">-</div>
+        </div>
+        <div class="item wide">
+          <div class="label">对方候选 / IP</div>
+          <div class="value" id="remoteCandidate">-</div>
+        </div>
+        <div class="item wide">
+          <div class="label">传输细节</div>
+          <div class="value" id="transportDetail">-</div>
+        </div>
+        <div class="item">
+          <div class="label">刷新时间</div>
+          <div class="value muted" id="refreshTime">-</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
       <div class="row">
         <input id="messageInput" value="hello from browser" />
         <button id="sendButton" disabled>发送消息</button>
@@ -168,6 +240,19 @@
       selfId: document.querySelector('#selfId'),
       serverPeerId: document.querySelector('#serverPeerId'),
       status: document.querySelector('#status'),
+      connectionRoute: document.querySelector('#connectionRoute'),
+      turnConfigStatus: document.querySelector('#turnConfigStatus'),
+      iceState: document.querySelector('#iceState'),
+      rtt: document.querySelector('#rtt'),
+      availableBitrate: document.querySelector('#availableBitrate'),
+      transferRate: document.querySelector('#transferRate'),
+      totalBytes: document.querySelector('#totalBytes'),
+      dataChannel: document.querySelector('#dataChannel'),
+      candidatePair: document.querySelector('#candidatePair'),
+      localCandidate: document.querySelector('#localCandidate'),
+      remoteCandidate: document.querySelector('#remoteCandidate'),
+      transportDetail: document.querySelector('#transportDetail'),
+      refreshTime: document.querySelector('#refreshTime'),
       messageInput: document.querySelector('#messageInput'),
       sendButton: document.querySelector('#sendButton'),
       statusButton: document.querySelector('#statusButton'),
@@ -176,6 +261,8 @@
     }
 
     let serverPeerId = ''
+    let statsTimer = 0
+    let lastTrafficSample = null
 
     el.roomId.textContent = ROOM_ID
     el.selfId.textContent = selfId
@@ -194,6 +281,11 @@
         }
       ]
     }
+
+    el.turnConfigStatus.textContent = roomConfig.turnConfig
+      ? `已配置: ${TURN_URL}`
+      : '未配置'
+    resetConnectionDetails()
 
     const room = joinRoom(
       roomConfig,
@@ -226,6 +318,7 @@
         el.sendButton.disabled = true
         el.statusButton.disabled = true
         setStatus('服务端已离线')
+        resetConnectionDetails()
       }
     }
 
@@ -240,6 +333,8 @@
       el.statusButton.disabled = false
       setStatus(`已连接: ${data.serverName || 'server'}`)
       writeLog('server hello', data)
+      refreshConnectionDetails()
+      startStatsTimer()
     }
 
     serverReply.onMessage = (data, {peerId}) => {
@@ -307,6 +402,7 @@
       selfId
     })
     setStatus('等待服务端连接')
+    startStatsTimer()
 
     function setStatus(value) {
       el.status.textContent = value
@@ -324,6 +420,281 @@
       }
 
       return JSON.stringify(value, null, 2)
+    }
+
+    function startStatsTimer() {
+      if (statsTimer) {
+        return
+      }
+
+      statsTimer = window.setInterval(refreshConnectionDetails, 2000)
+    }
+
+    async function refreshConnectionDetails() {
+      if (!serverPeerId) {
+        return
+      }
+
+      const pc = getPeerConnection(serverPeerId)
+
+      if (!pc) {
+        setConnectionDetails({
+          connectionRoute: '已发现 peer，等待 WebRTC 连接对象',
+          iceState: '-',
+          refreshTime: new Date().toLocaleTimeString()
+        })
+        return
+      }
+
+      try {
+        const stats = await pc.getStats()
+        const detail = parseConnectionStats(pc, stats)
+        setConnectionDetails(detail)
+      } catch (error) {
+        setConnectionDetails({
+          connectionRoute: '读取连接统计失败',
+          transportDetail: String(error),
+          refreshTime: new Date().toLocaleTimeString()
+        })
+      }
+    }
+
+    function getPeerConnection(peerId) {
+      const peers = typeof room.getPeers === 'function' ? room.getPeers() : {}
+      return peers[peerId] || null
+    }
+
+    function parseConnectionStats(pc, stats) {
+      const selectedPair = getSelectedCandidatePair(stats)
+      const localCandidate = selectedPair
+        ? stats.get(selectedPair.localCandidateId)
+        : null
+      const remoteCandidate = selectedPair
+        ? stats.get(selectedPair.remoteCandidateId)
+        : null
+      const dataChannel = findStatsByType(stats, 'data-channel')[0]
+      const transport = findStatsByType(stats, 'transport')[0]
+      const traffic = getTrafficRates(selectedPair, dataChannel)
+      const routeType = getRouteType(localCandidate, remoteCandidate)
+
+      return {
+        connectionRoute: describeRoute(routeType),
+        iceState: [
+          `ICE: ${pc.iceConnectionState || '-'}`,
+          `PC: ${pc.connectionState || '-'}`,
+          `signaling: ${pc.signalingState || '-'}`
+        ].join(' / '),
+        rtt: formatSeconds(selectedPair?.currentRoundTripTime),
+        availableBitrate: formatBitsPerSecond(selectedPair?.availableOutgoingBitrate),
+        transferRate: `上行 ${formatBitsPerSecond(traffic.sendBps)} / 下行 ${formatBitsPerSecond(traffic.recvBps)}`,
+        totalBytes: `发送 ${formatBytes(traffic.bytesSent)} / 接收 ${formatBytes(traffic.bytesReceived)}`,
+        dataChannel: dataChannel
+          ? [
+              dataChannel.label ? `label: ${dataChannel.label}` : '',
+              dataChannel.state ? `state: ${dataChannel.state}` : '',
+              numberOrNull(dataChannel.messagesSent) !== null ? `sent: ${dataChannel.messagesSent}` : '',
+              numberOrNull(dataChannel.messagesReceived) !== null ? `received: ${dataChannel.messagesReceived}` : ''
+            ].filter(Boolean).join(' / ')
+          : '-',
+        candidatePair: selectedPair
+          ? [
+              `state: ${selectedPair.state || '-'}`,
+              selectedPair.nominated ? 'nominated' : '',
+              selectedPair.priority ? `priority: ${selectedPair.priority}` : ''
+            ].filter(Boolean).join(' / ')
+          : '未选出候选对',
+        localCandidate: formatCandidate(localCandidate),
+        remoteCandidate: formatCandidate(remoteCandidate),
+        transportDetail: [
+          transport?.dtlsState ? `DTLS: ${transport.dtlsState}` : '',
+          selectedPair?.requestsSent !== undefined ? `requestsSent: ${selectedPair.requestsSent}` : '',
+          selectedPair?.responsesReceived !== undefined ? `responsesReceived: ${selectedPair.responsesReceived}` : '',
+          selectedPair?.consentRequestsSent !== undefined ? `consentRequestsSent: ${selectedPair.consentRequestsSent}` : ''
+        ].filter(Boolean).join(' / ') || '-',
+        refreshTime: new Date().toLocaleTimeString()
+      }
+    }
+
+    function getSelectedCandidatePair(stats) {
+      const transports = findStatsByType(stats, 'transport')
+
+      for (const transport of transports) {
+        if (transport.selectedCandidatePairId && stats.has(transport.selectedCandidatePairId)) {
+          return stats.get(transport.selectedCandidatePairId)
+        }
+      }
+
+      return findStatsByType(stats, 'candidate-pair').find(pair =>
+        pair.selected || (pair.nominated && pair.state === 'succeeded')
+      ) || null
+    }
+
+    function findStatsByType(stats, type) {
+      const matches = []
+      stats.forEach(report => {
+        if (report.type === type) {
+          matches.push(report)
+        }
+      })
+      return matches
+    }
+
+    function getTrafficRates(selectedPair, dataChannel) {
+      const now = performance.now()
+      const bytesSent = numberOrNull(selectedPair?.bytesSent)
+        ?? numberOrNull(dataChannel?.bytesSent)
+        ?? 0
+      const bytesReceived = numberOrNull(selectedPair?.bytesReceived)
+        ?? numberOrNull(dataChannel?.bytesReceived)
+        ?? 0
+      let sendBps = null
+      let recvBps = null
+
+      if (lastTrafficSample) {
+        const elapsedSeconds = (now - lastTrafficSample.time) / 1000
+
+        if (elapsedSeconds > 0) {
+          sendBps = Math.max(0, (bytesSent - lastTrafficSample.bytesSent) * 8 / elapsedSeconds)
+          recvBps = Math.max(0, (bytesReceived - lastTrafficSample.bytesReceived) * 8 / elapsedSeconds)
+        }
+      }
+
+      lastTrafficSample = {time: now, bytesSent, bytesReceived}
+
+      return {bytesSent, bytesReceived, sendBps, recvBps}
+    }
+
+    function describeRoute(type) {
+      if (type === 'relay') {
+        return 'TURN relay 中继'
+      }
+
+      if (type === 'srflx') {
+        return 'STUN srflx 公网映射'
+      }
+
+      if (type === 'host') {
+        return 'Host 直连 / 局域网候选'
+      }
+
+      if (type === 'prflx') {
+        return 'Peer reflexive 候选'
+      }
+
+      return '未知，等待 ICE 统计'
+    }
+
+    function getRouteType(localCandidate, remoteCandidate) {
+      const types = [
+        localCandidate?.candidateType,
+        remoteCandidate?.candidateType
+      ].filter(Boolean)
+
+      if (types.includes('relay')) {
+        return 'relay'
+      }
+
+      if (types.includes('srflx')) {
+        return 'srflx'
+      }
+
+      if (types.includes('prflx')) {
+        return 'prflx'
+      }
+
+      return types[0] || ''
+    }
+
+    function formatCandidate(candidate) {
+      if (!candidate) {
+        return '-'
+      }
+
+      const address = candidate.address || candidate.ip || candidate.hostname || '-'
+      const port = candidate.port || '-'
+      const parts = [
+        `type: ${candidate.candidateType || '-'}`,
+        `addr: ${address}:${port}`,
+        `protocol: ${candidate.protocol || '-'}`,
+        candidate.networkType ? `network: ${candidate.networkType}` : '',
+        candidate.relayProtocol ? `relayProtocol: ${candidate.relayProtocol}` : '',
+        candidate.tcpType ? `tcpType: ${candidate.tcpType}` : '',
+        candidate.url ? `url: ${candidate.url}` : ''
+      ]
+
+      return parts.filter(Boolean).join(' / ')
+    }
+
+    function setConnectionDetails(detail) {
+      for (const [key, value] of Object.entries(detail)) {
+        if (el[key]) {
+          el[key].textContent = value ?? '-'
+        }
+      }
+    }
+
+    function resetConnectionDetails() {
+      lastTrafficSample = null
+      setConnectionDetails({
+        connectionRoute: '等待连接',
+        turnConfigStatus: roomConfig.turnConfig ? `已配置: ${TURN_URL}` : '未配置',
+        iceState: '-',
+        rtt: '-',
+        availableBitrate: '-',
+        transferRate: '-',
+        totalBytes: '-',
+        dataChannel: '-',
+        candidatePair: '-',
+        localCandidate: '-',
+        remoteCandidate: '-',
+        transportDetail: '-',
+        refreshTime: '-'
+      })
+    }
+
+    function formatSeconds(value) {
+      const number = numberOrNull(value)
+      return number === null ? '-' : `${Math.round(number * 1000)} ms`
+    }
+
+    function formatBitsPerSecond(value) {
+      const number = numberOrNull(value)
+
+      if (number === null) {
+        return '-'
+      }
+
+      if (number >= 1000 * 1000) {
+        return `${(number / 1000 / 1000).toFixed(2)} Mbps`
+      }
+
+      if (number >= 1000) {
+        return `${(number / 1000).toFixed(1)} Kbps`
+      }
+
+      return `${Math.round(number)} bps`
+    }
+
+    function formatBytes(value) {
+      const number = numberOrNull(value)
+
+      if (number === null) {
+        return '-'
+      }
+
+      if (number >= 1024 * 1024) {
+        return `${(number / 1024 / 1024).toFixed(2)} MB`
+      }
+
+      if (number >= 1024) {
+        return `${(number / 1024).toFixed(1)} KB`
+      }
+
+      return `${number} B`
+    }
+
+    function numberOrNull(value) {
+      return Number.isFinite(value) ? value : null
     }
   </script>
 </body>
