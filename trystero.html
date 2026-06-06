@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -128,6 +129,7 @@
     }
   </style>
 </head>
+
 <body>
   <main>
     <h1>Trystero P2P Test</h1>
@@ -226,14 +228,14 @@
   </main>
 
   <script type="module">
-    import {joinRoom, selfId} from 'https://esm.run/trystero'
+    import { joinRoom, selfId } from 'https://esm.run/trystero'
 
     const APP_ID = 'xinling-trystero-test-v1'
     const ROOM_ID = 'xinling-home-server-room-20260606-private-k7x9m2q4'
     const PASSWORD = 'xinling-test-password'
-    const TURN_URL = ''
-    const TURN_USERNAME = ''
-    const TURN_CREDENTIAL = ''
+    const TURN_URL = 'turn:openrelay.metered.ca:443?transport=tcp'
+    const TURN_USERNAME = 'openrelayproject'
+    const TURN_CREDENTIAL = 'openrelayproject'
 
     const el = {
       roomId: document.querySelector('#roomId'),
@@ -302,15 +304,15 @@
     const clientMessage = room.makeAction('client-message')
     const serverReply = room.makeAction('server-reply')
     const serverPush = room.makeAction('server-push')
-    const statusRequest = room.makeAction('status-request', {kind: 'request'})
+    const statusRequest = room.makeAction('status-request', { kind: 'request' })
 
     room.onPeerJoin = peerId => {
-      writeLog('peer joined', {peerId})
+      writeLog('peer joined', { peerId })
       setStatus('发现 peer，等待服务端 hello')
     }
 
     room.onPeerLeave = peerId => {
-      writeLog('peer left', {peerId})
+      writeLog('peer left', { peerId })
 
       if (peerId === serverPeerId) {
         serverPeerId = ''
@@ -322,7 +324,7 @@
       }
     }
 
-    hello.onMessage = (data, {peerId}) => {
+    hello.onMessage = (data, { peerId }) => {
       if (data?.role !== 'server') {
         return
       }
@@ -337,7 +339,7 @@
       startStatsTimer()
     }
 
-    serverReply.onMessage = (data, {peerId}) => {
+    serverReply.onMessage = (data, { peerId }) => {
       if (serverPeerId && peerId !== serverPeerId) {
         return
       }
@@ -345,7 +347,7 @@
       writeLog('server reply', data)
     }
 
-    serverPush.onMessage = (data, {peerId}) => {
+    serverPush.onMessage = (data, { peerId }) => {
       if (serverPeerId && peerId !== serverPeerId) {
         return
       }
@@ -366,7 +368,7 @@
       }
 
       try {
-        await clientMessage.send(payload, {target: serverPeerId})
+        await clientMessage.send(payload, { target: serverPeerId })
         writeLog('client sent', payload)
       } catch (error) {
         writeLog('send failed', String(error))
@@ -381,8 +383,8 @@
 
       try {
         const result = await statusRequest.request(
-          {browserPeerId: selfId, browserTime: new Date().toISOString()},
-          {target: serverPeerId, timeoutMs: 5000}
+          { browserPeerId: selfId, browserTime: new Date().toISOString() },
+          { target: serverPeerId, timeoutMs: 5000 }
         )
 
         writeLog('status result', result)
@@ -490,18 +492,18 @@
         totalBytes: `发送 ${formatBytes(traffic.bytesSent)} / 接收 ${formatBytes(traffic.bytesReceived)}`,
         dataChannel: dataChannel
           ? [
-              dataChannel.label ? `label: ${dataChannel.label}` : '',
-              dataChannel.state ? `state: ${dataChannel.state}` : '',
-              numberOrNull(dataChannel.messagesSent) !== null ? `sent: ${dataChannel.messagesSent}` : '',
-              numberOrNull(dataChannel.messagesReceived) !== null ? `received: ${dataChannel.messagesReceived}` : ''
-            ].filter(Boolean).join(' / ')
+            dataChannel.label ? `label: ${dataChannel.label}` : '',
+            dataChannel.state ? `state: ${dataChannel.state}` : '',
+            numberOrNull(dataChannel.messagesSent) !== null ? `sent: ${dataChannel.messagesSent}` : '',
+            numberOrNull(dataChannel.messagesReceived) !== null ? `received: ${dataChannel.messagesReceived}` : ''
+          ].filter(Boolean).join(' / ')
           : '-',
         candidatePair: selectedPair
           ? [
-              `state: ${selectedPair.state || '-'}`,
-              selectedPair.nominated ? 'nominated' : '',
-              selectedPair.priority ? `priority: ${selectedPair.priority}` : ''
-            ].filter(Boolean).join(' / ')
+            `state: ${selectedPair.state || '-'}`,
+            selectedPair.nominated ? 'nominated' : '',
+            selectedPair.priority ? `priority: ${selectedPair.priority}` : ''
+          ].filter(Boolean).join(' / ')
           : '未选出候选对',
         localCandidate: formatCandidate(localCandidate),
         remoteCandidate: formatCandidate(remoteCandidate),
@@ -559,9 +561,9 @@
         }
       }
 
-      lastTrafficSample = {time: now, bytesSent, bytesReceived}
+      lastTrafficSample = { time: now, bytesSent, bytesReceived }
 
-      return {bytesSent, bytesReceived, sendBps, recvBps}
+      return { bytesSent, bytesReceived, sendBps, recvBps }
     }
 
     function describeRoute(type) {
@@ -698,4 +700,5 @@
     }
   </script>
 </body>
+
 </html>
