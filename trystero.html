@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trystero P2P Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      background: #f5f7fb;
+      color: #1b2533;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .panel {
+      background: #fff;
+      border: 1px solid #d9e1ec;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .item {
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+
+    .label {
+      color: #64748b;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .value {
+      word-break: break-all;
+      font-size: 14px;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    input {
+      flex: 1 1 280px;
+      min-width: 0;
+      height: 38px;
+      padding: 0 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    button {
+      height: 38px;
+      padding: 0 14px;
+      border: 1px solid #1f6feb;
+      border-radius: 6px;
+      background: #1f6feb;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button.secondary {
+      border-color: #cbd5e1;
+      background: #fff;
+      color: #1b2533;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    pre {
+      min-height: 320px;
+      max-height: 520px;
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      border-radius: 6px;
+      background: #101828;
+      color: #e5e7eb;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Trystero P2P Test</h1>
+
+    <section class="panel">
+      <div class="grid">
+        <div class="item">
+          <div class="label">Room</div>
+          <div class="value" id="roomId">-</div>
+        </div>
+        <div class="item">
+          <div class="label">Browser Peer ID</div>
+          <div class="value" id="selfId">-</div>
+        </div>
+        <div class="item">
+          <div class="label">Server Peer ID</div>
+          <div class="value" id="serverPeerId">未连接</div>
+        </div>
+        <div class="item">
+          <div class="label">Status</div>
+          <div class="value" id="status">启动中</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row">
+        <input id="messageInput" value="hello from browser" />
+        <button id="sendButton" disabled>发送消息</button>
+        <button id="statusButton" class="secondary" disabled>获取状态</button>
+        <button id="clearButton" class="secondary">清空日志</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <script type="module">
+    import {joinRoom, selfId} from 'https://esm.run/trystero'
+
+    const APP_ID = 'xinling-trystero-test-v1'
+    const ROOM_ID = 'xinling-home-server-room'
+    const PASSWORD = 'xinling-test-password'
+
+    const el = {
+      roomId: document.querySelector('#roomId'),
+      selfId: document.querySelector('#selfId'),
+      serverPeerId: document.querySelector('#serverPeerId'),
+      status: document.querySelector('#status'),
+      messageInput: document.querySelector('#messageInput'),
+      sendButton: document.querySelector('#sendButton'),
+      statusButton: document.querySelector('#statusButton'),
+      clearButton: document.querySelector('#clearButton'),
+      log: document.querySelector('#log')
+    }
+
+    let serverPeerId = ''
+
+    el.roomId.textContent = ROOM_ID
+    el.selfId.textContent = selfId
+
+    const room = joinRoom(
+      {
+        appId: APP_ID,
+        password: PASSWORD
+      },
+      ROOM_ID,
+      {
+        onJoinError: details => {
+          setStatus('连接失败')
+          writeLog('join error', details)
+        }
+      }
+    )
+
+    const hello = room.makeAction('hello')
+    const clientMessage = room.makeAction('client-message')
+    const serverReply = room.makeAction('server-reply')
+    const serverPush = room.makeAction('server-push')
+    const statusRequest = room.makeAction('status-request', {kind: 'request'})
+
+    room.onPeerJoin = peerId => {
+      writeLog('peer joined', {peerId})
+      setStatus('发现 peer，等待服务端 hello')
+    }
+
+    room.onPeerLeave = peerId => {
+      writeLog('peer left', {peerId})
+
+      if (peerId === serverPeerId) {
+        serverPeerId = ''
+        el.serverPeerId.textContent = '未连接'
+        el.sendButton.disabled = true
+        el.statusButton.disabled = true
+        setStatus('服务端已离线')
+      }
+    }
+
+    hello.onMessage = (data, {peerId}) => {
+      if (data?.role !== 'server') {
+        return
+      }
+
+      serverPeerId = peerId
+      el.serverPeerId.textContent = peerId
+      el.sendButton.disabled = false
+      el.statusButton.disabled = false
+      setStatus(`已连接: ${data.serverName || 'server'}`)
+      writeLog('server hello', data)
+    }
+
+    serverReply.onMessage = (data, {peerId}) => {
+      if (serverPeerId && peerId !== serverPeerId) {
+        return
+      }
+
+      writeLog('server reply', data)
+    }
+
+    serverPush.onMessage = (data, {peerId}) => {
+      if (serverPeerId && peerId !== serverPeerId) {
+        return
+      }
+
+      writeLog('server push', data)
+    }
+
+    el.sendButton.addEventListener('click', async () => {
+      if (!serverPeerId) {
+        writeLog('error', 'server not connected')
+        return
+      }
+
+      const payload = {
+        text: el.messageInput.value,
+        browserPeerId: selfId,
+        browserTime: new Date().toISOString()
+      }
+
+      try {
+        await clientMessage.send(payload, {target: serverPeerId})
+        writeLog('client sent', payload)
+      } catch (error) {
+        writeLog('send failed', String(error))
+      }
+    })
+
+    el.statusButton.addEventListener('click', async () => {
+      if (!serverPeerId) {
+        writeLog('error', 'server not connected')
+        return
+      }
+
+      try {
+        const result = await statusRequest.request(
+          {browserPeerId: selfId, browserTime: new Date().toISOString()},
+          {target: serverPeerId, timeoutMs: 5000}
+        )
+
+        writeLog('status result', result)
+      } catch (error) {
+        writeLog('status failed', String(error))
+      }
+    })
+
+    el.clearButton.addEventListener('click', () => {
+      el.log.textContent = ''
+    })
+
+    writeLog('browser online', {
+      appId: APP_ID,
+      roomId: ROOM_ID,
+      selfId
+    })
+    setStatus('等待服务端连接')
+
+    function setStatus(value) {
+      el.status.textContent = value
+    }
+
+    function writeLog(label, value) {
+      const line = `[${new Date().toLocaleTimeString()}] ${label}: ${format(value)}\n`
+      el.log.textContent += line
+      el.log.scrollTop = el.log.scrollHeight
+    }
+
+    function format(value) {
+      if (typeof value === 'string') {
+        return value
+      }
+
+      return JSON.stringify(value, null, 2)
+    }
+  </script>
+</body>
+</html>
