@@ -6,6 +6,7 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server);
+app.use(express.static(__dirname));
 
 // 静态文件服务
 app.use(express.static(__dirname));
