@@ -1,11 +1,14 @@
 const APP_ID = 'xinling-trystero-test-v1'
-const ROOM_ID = 'xinling-home-server-room'
+const ROOM_ID = 'xinling-home-server-room-20260606-private-k7x9m2q4'
 const PASSWORD = 'xinling-test-password'
 const SERVER_NAME = process.env.SERVER_NAME || 'home-pc-server'
 const PUSH_INTERVAL_MS = 5000
+const TURN_URL = 'turn:openrelay.metered.ca:443?transport=tcp'
+const TURN_USERNAME = 'openrelayproject'
+const TURN_CREDENTIAL = 'openrelayproject'
 
 async function main() {
-  const [{joinRoom, selfId}, {RTCPeerConnection}] = await Promise.all([
+  const [{ joinRoom, selfId }, { RTCPeerConnection }] = await Promise.all([
     import('trystero'),
     import('werift')
   ])
@@ -13,12 +16,24 @@ async function main() {
   const peers = new Set()
   let pushSeq = 0
 
+  const roomConfig = {
+    appId: APP_ID,
+    password: PASSWORD,
+    rtcPolyfill: RTCPeerConnection
+  }
+
+  if (TURN_URL && TURN_USERNAME && TURN_CREDENTIAL) {
+    roomConfig.turnConfig = [
+      {
+        urls: [TURN_URL],
+        username: TURN_USERNAME,
+        credential: TURN_CREDENTIAL
+      }
+    ]
+  }
+
   const room = joinRoom(
-    {
-      appId: APP_ID,
-      password: PASSWORD,
-      rtcPolyfill: RTCPeerConnection
-    },
+    roomConfig,
     ROOM_ID,
     {
       onJoinError: details => {
@@ -48,7 +63,7 @@ async function main() {
     peers.add(peerId)
     log('peer joined', peerId)
     sendHello(peerId).catch(error => {
-      log('hello failed', {peerId, error: String(error)})
+      log('hello failed', { peerId, error: String(error) })
     })
   }
 
@@ -57,8 +72,8 @@ async function main() {
     log('peer left', peerId)
   }
 
-  clientMessage.onMessage = async (data, {peerId}) => {
-    log('client message', {peerId, data})
+  clientMessage.onMessage = async (data, { peerId }) => {
+    log('client message', { peerId, data })
 
     await serverReply.send(
       {
@@ -69,7 +84,7 @@ async function main() {
         serverTime: new Date().toISOString(),
         received: data
       },
-      {target: peerId}
+      { target: peerId }
     )
   }
 
@@ -82,7 +97,7 @@ async function main() {
         roomId: ROOM_ID,
         time: new Date().toISOString()
       },
-      {target: peerId}
+      { target: peerId }
     )
   }
 
@@ -111,6 +126,7 @@ async function main() {
     appId: APP_ID,
     roomId: ROOM_ID,
     serverName: SERVER_NAME,
+    turnEnabled: Boolean(roomConfig.turnConfig),
     selfId
   })
 
@@ -140,5 +156,11 @@ main().catch(error => {
   console.error('')
   console.error('Install dependencies first:')
   console.error('  npm i trystero werift')
+  console.error('')
+  console.error('Optional TURN example:')
+  console.error("  $env:TURN_URL='turn:your-turn.example.com:3478'")
+  console.error("  $env:TURN_USERNAME='user'")
+  console.error("  $env:TURN_CREDENTIAL='pass'")
+  console.error('  node server.js')
   process.exit(1)
 })

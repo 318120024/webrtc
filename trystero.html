@@ -157,8 +157,11 @@
     import {joinRoom, selfId} from 'https://esm.run/trystero'
 
     const APP_ID = 'xinling-trystero-test-v1'
-    const ROOM_ID = 'xinling-home-server-room'
+    const ROOM_ID = 'xinling-home-server-room-20260606-private-k7x9m2q4'
     const PASSWORD = 'xinling-test-password'
+    const TURN_URL = ''
+    const TURN_USERNAME = ''
+    const TURN_CREDENTIAL = ''
 
     const el = {
       roomId: document.querySelector('#roomId'),
@@ -177,11 +180,23 @@
     el.roomId.textContent = ROOM_ID
     el.selfId.textContent = selfId
 
+    const roomConfig = {
+      appId: APP_ID,
+      password: PASSWORD
+    }
+
+    if (TURN_URL && TURN_USERNAME && TURN_CREDENTIAL) {
+      roomConfig.turnConfig = [
+        {
+          urls: [TURN_URL],
+          username: TURN_USERNAME,
+          credential: TURN_CREDENTIAL
+        }
+      ]
+    }
+
     const room = joinRoom(
-      {
-        appId: APP_ID,
-        password: PASSWORD
-      },
+      roomConfig,
       ROOM_ID,
       {
         onJoinError: details => {
@@ -288,6 +303,7 @@
     writeLog('browser online', {
       appId: APP_ID,
       roomId: ROOM_ID,
+      turnEnabled: Boolean(roomConfig.turnConfig),
       selfId
     })
     setStatus('等待服务端连接')
