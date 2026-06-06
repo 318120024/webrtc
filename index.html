@@ -100,6 +100,14 @@
       transform: scaleX(-1);
     }
 
+    .video-wrapper video.screen-video {
+      object-fit: contain;
+    }
+
+    #localVideo.screen-video {
+      transform: none;
+    }
+
     input[type="text"] {
       padding: 10px;
       border: 1px solid #ccc;
@@ -212,19 +220,20 @@
     </div>
     <button id="callBtn" disabled>语音通话</button>
     <button id="videoCallBtn" disabled>视频通话</button>
+    <button id="shareScreenBtn" disabled>共享屏幕</button>
     <button id="hangupBtn" disabled style="background: #f44336;">挂断</button>
     <button id="muteBtn" disabled>静音</button>
     <button id="toggleVideoBtn" disabled>关闭摄像头</button>
     <div id="callStatus" style="margin-top: 10px; color: #666;"></div>
 
     <div class="video-container" id="videoContainer" style="display: none;">
-      <div class="video-wrapper">
+      <div class="video-wrapper" id="localVideoWrapper">
         <video id="localVideo" autoplay muted playsinline></video>
-        <div class="video-label">我</div>
+        <div class="video-label" id="localVideoLabel">我</div>
       </div>
       <div class="video-wrapper">
         <video id="remoteVideo" autoplay playsinline></video>
-        <div class="video-label">对方</div>
+        <div class="video-label" id="remoteVideoLabel">对方</div>
       </div>
     </div>
 

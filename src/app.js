@@ -45,6 +45,7 @@ let localStream = null;
 let isMuted = false;
 let isVideoEnabled = true;
 let isVideoCall = false;
+let isScreenShare = false;
 let isCleaningUp = false;
 const unsubscribeFns = [];
 const seenCandidates = new Set();
@@ -59,13 +60,17 @@ const els = {
   connectBtn: document.getElementById("connectBtn"),
   callBtn: document.getElementById("callBtn"),
   videoCallBtn: document.getElementById("videoCallBtn"),
+  shareScreenBtn: document.getElementById("shareScreenBtn"),
   hangupBtn: document.getElementById("hangupBtn"),
   muteBtn: document.getElementById("muteBtn"),
   toggleVideoBtn: document.getElementById("toggleVideoBtn"),
   callStatus: document.getElementById("callStatus"),
   videoContainer: document.getElementById("videoContainer"),
+  localVideoWrapper: document.getElementById("localVideoWrapper"),
   localVideo: document.getElementById("localVideo"),
+  localVideoLabel: document.getElementById("localVideoLabel"),
   remoteVideo: document.getElementById("remoteVideo"),
+  remoteVideoLabel: document.getElementById("remoteVideoLabel"),
   remoteAudio: document.getElementById("remoteAudio"),
   chat: document.getElementById("chat"),
   messageInput: document.getElementById("messageInput"),
@@ -218,6 +223,7 @@ function setupDataChannel(channel) {
     els.connectBtn.disabled = true;
     els.callBtn.disabled = false;
     els.videoCallBtn.disabled = false;
+    els.shareScreenBtn.disabled = !canShareScreen();
   };
 
   channel.onmessage = (event) => {
@@ -232,6 +238,7 @@ function setupDataChannel(channel) {
     els.connectBtn.disabled = false;
     els.callBtn.disabled = true;
     els.videoCallBtn.disabled = true;
+    els.shareScreenBtn.disabled = true;
     hangupCall(false);
   };
 
@@ -280,30 +287,53 @@ function listenForCallOffers(targetRoomId) {
   unsubscribeFns.push(() => off(offerRef, "value", callback));
 }
 
-async function startCall(withVideo) {
+async function startCall(withVideo, shareScreen = false) {
   if (!isDataChannelOpen()) {
     alert("请先建立连接");
     return;
   }
 
   try {
-    isVideoCall = withVideo;
-    updateCallStatus(withVideo ? "正在获取摄像头和麦克风权限..." : "正在获取麦克风权限...");
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+    if (shareScreen && !canShareScreen()) {
+      throw new Error("当前浏览器不支持屏幕共享");
+    }
 
-    if (withVideo) {
-      showVideoUI();
+    isScreenShare = shareScreen;
+    isVideoCall = withVideo || shareScreen;
+
+    if (shareScreen) {
+      updateCallStatus("正在选择共享屏幕...");
+      localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      localStream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        if (isScreenShare) {
+          hangupCall(true);
+        }
+      }, { once: true });
+      showVideoUI(true, true);
+      els.localVideo.srcObject = localStream;
+    } else {
+      updateCallStatus(withVideo ? "正在获取摄像头和麦克风权限..." : "正在获取麦克风权限...");
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+
+      if (withVideo) {
+        showVideoUI(false, true);
+        els.localVideo.srcObject = localStream;
+      }
+    }
+
+    if (isVideoCall) {
       els.localVideo.srcObject = localStream;
     }
 
     callPc = createPeerConnection("call", "callerCandidates");
     setupCallPeerConnection(callPc);
     localStream.getTracks().forEach((track) => callPc.addTrack(track, localStream));
+    setCallControlsActive();
 
     await remove(ref(db, `rooms/${activeRoomId}/call`));
     await set(ref(db, `rooms/${activeRoomId}/call`), {
       active: true,
-      type: withVideo ? "video" : "audio",
+      type: shareScreen ? "screen" : withVideo ? "video" : "audio",
       startedBy: uid,
       startedAt: serverTimestamp()
     });
@@ -318,11 +348,12 @@ async function startCall(withVideo) {
     });
     listenForCandidates(`rooms/${activeRoomId}/call/calleeCandidates`, callPc);
 
-    updateCallStatus(withVideo ? "正在发起视频通话..." : "正在发起语音通话...");
-    addChatMessage("系统", withVideo ? "正在发起视频通话..." : "正在发起语音通话...");
+    const callText = shareScreen ? "屏幕共享" : withVideo ? "视频通话" : "语音通话";
+    updateCallStatus(`正在发起${callText}...`);
+    addChatMessage("系统", `正在发起${callText}...`);
   } catch (err) {
     console.error("无法发起通话:", err);
-    alert("无法获取媒体权限或发起通话，请检查浏览器设置");
+    alert(`无法发起通话: ${err.message}`);
     updateCallStatus("");
     cleanupCall(false);
   }
@@ -337,17 +368,25 @@ async function answerIncomingCall(targetRoomId) {
   if (!callData || !callData.offer) return;
   if (callData.startedBy === uid) return;
 
-  isVideoCall = callData.type === "video";
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoCall });
+  isScreenShare = callData.type === "screen";
+  isVideoCall = callData.type === "video" || isScreenShare;
 
-  if (isVideoCall) {
-    showVideoUI();
+  if (isScreenShare) {
+    localStream = null;
+    showVideoUI(true, false);
+  } else {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoCall });
+  }
+
+  if (isVideoCall && !isScreenShare) {
+    showVideoUI(false, true);
     els.localVideo.srcObject = localStream;
   }
 
   callPc = createPeerConnection("call", "calleeCandidates");
   setupCallPeerConnection(callPc);
-  localStream.getTracks().forEach((track) => callPc.addTrack(track, localStream));
+  localStream?.getTracks().forEach((track) => callPc.addTrack(track, localStream));
+  setCallControlsActive();
 
   await callPc.setRemoteDescription(new RTCSessionDescription(callData.offer));
   const answer = await callPc.createAnswer();
@@ -361,20 +400,17 @@ function setupCallPeerConnection(pc) {
   pc.ontrack = (event) => {
     const [remoteStream] = event.streams;
     if (isVideoCall) {
+      showVideoUI(isScreenShare, false);
       els.remoteVideo.srcObject = remoteStream;
-      updateCallStatus("视频通话中");
-      addChatMessage("系统", "视频通话已建立");
+      updateCallStatus(isScreenShare ? "屏幕共享中" : "视频通话中");
+      addChatMessage("系统", isScreenShare ? "屏幕共享已建立" : "视频通话已建立");
     } else {
       els.remoteAudio.srcObject = remoteStream;
       updateCallStatus("语音通话中");
       addChatMessage("系统", "语音通话已建立");
     }
 
-    els.callBtn.disabled = true;
-    els.videoCallBtn.disabled = true;
-    els.hangupBtn.disabled = false;
-    els.muteBtn.disabled = false;
-    els.toggleVideoBtn.disabled = !isVideoCall;
+    setCallControlsActive();
   };
 
   pc.onconnectionstatechange = () => {
@@ -409,6 +445,7 @@ async function cleanupCall(clearRemoteSignal) {
 
   els.callBtn.disabled = !isDataChannelOpen();
   els.videoCallBtn.disabled = !isDataChannelOpen();
+  els.shareScreenBtn.disabled = !isDataChannelOpen() || !canShareScreen();
   els.hangupBtn.disabled = true;
   els.muteBtn.disabled = true;
   els.toggleVideoBtn.disabled = true;
@@ -419,6 +456,7 @@ async function cleanupCall(clearRemoteSignal) {
   isMuted = false;
   isVideoEnabled = true;
   isVideoCall = false;
+  isScreenShare = false;
   updateCallStatus("");
 
   if (clearRemoteSignal && activeRoomId) {
@@ -446,6 +484,7 @@ function cleanupConnection(keepHostRoom) {
   els.sendBtn.disabled = true;
   els.callBtn.disabled = true;
   els.videoCallBtn.disabled = true;
+  els.shareScreenBtn.disabled = true;
 
   if (keepHostRoom && roomId) {
     createHostRoom(roomId).catch((err) => {
@@ -506,12 +545,35 @@ function getLocalUid() {
   return nextUid;
 }
 
-function showVideoUI() {
+function showVideoUI(screenMode = false, sharingLocal = false) {
   els.videoContainer.style.display = "flex";
+  els.localVideoWrapper.style.display = screenMode && !sharingLocal ? "none" : "";
+  els.localVideo.classList.toggle("screen-video", screenMode);
+  els.remoteVideo.classList.toggle("screen-video", screenMode);
+  els.localVideoLabel.textContent = screenMode && sharingLocal ? "共享屏幕" : "我";
+  els.remoteVideoLabel.textContent = screenMode ? "对方屏幕" : "对方";
 }
 
 function hideVideoUI() {
   els.videoContainer.style.display = "none";
+  els.localVideoWrapper.style.display = "";
+  els.localVideo.classList.remove("screen-video");
+  els.remoteVideo.classList.remove("screen-video");
+  els.localVideoLabel.textContent = "我";
+  els.remoteVideoLabel.textContent = "对方";
+}
+
+function canShareScreen() {
+  return Boolean(navigator.mediaDevices?.getDisplayMedia);
+}
+
+function setCallControlsActive() {
+  els.callBtn.disabled = true;
+  els.videoCallBtn.disabled = true;
+  els.shareScreenBtn.disabled = true;
+  els.hangupBtn.disabled = false;
+  els.muteBtn.disabled = !localStream?.getAudioTracks().length;
+  els.toggleVideoBtn.disabled = !isVideoCall || isScreenShare;
 }
 
 function updateCallStatus(text) {
@@ -552,6 +614,10 @@ els.callBtn.addEventListener("click", () => {
 
 els.videoCallBtn.addEventListener("click", () => {
   startCall(true);
+});
+
+els.shareScreenBtn.addEventListener("click", () => {
+  startCall(false, true);
 });
 
 els.hangupBtn.addEventListener("click", () => {

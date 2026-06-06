@@ -11103,6 +11103,7 @@ var localStream = null;
 var isMuted = false;
 var isVideoEnabled = true;
 var isVideoCall = false;
+var isScreenShare = false;
 var isCleaningUp = false;
 var unsubscribeFns = [];
 var seenCandidates = /* @__PURE__ */ new Set();
@@ -11116,13 +11117,17 @@ var els = {
   connectBtn: document.getElementById("connectBtn"),
   callBtn: document.getElementById("callBtn"),
   videoCallBtn: document.getElementById("videoCallBtn"),
+  shareScreenBtn: document.getElementById("shareScreenBtn"),
   hangupBtn: document.getElementById("hangupBtn"),
   muteBtn: document.getElementById("muteBtn"),
   toggleVideoBtn: document.getElementById("toggleVideoBtn"),
   callStatus: document.getElementById("callStatus"),
   videoContainer: document.getElementById("videoContainer"),
+  localVideoWrapper: document.getElementById("localVideoWrapper"),
   localVideo: document.getElementById("localVideo"),
+  localVideoLabel: document.getElementById("localVideoLabel"),
   remoteVideo: document.getElementById("remoteVideo"),
+  remoteVideoLabel: document.getElementById("remoteVideoLabel"),
   remoteAudio: document.getElementById("remoteAudio"),
   chat: document.getElementById("chat"),
   messageInput: document.getElementById("messageInput"),
@@ -11252,6 +11257,7 @@ function setupDataChannel(channel) {
     els.connectBtn.disabled = true;
     els.callBtn.disabled = false;
     els.videoCallBtn.disabled = false;
+    els.shareScreenBtn.disabled = !canShareScreen();
   };
   channel.onmessage = (event) => {
     addChatMessage("\u5BF9\u65B9", event.data);
@@ -11264,6 +11270,7 @@ function setupDataChannel(channel) {
     els.connectBtn.disabled = false;
     els.callBtn.disabled = true;
     els.videoCallBtn.disabled = true;
+    els.shareScreenBtn.disabled = true;
     hangupCall(false);
   };
   channel.onerror = (err) => {
@@ -11306,26 +11313,46 @@ function listenForCallOffers(targetRoomId) {
   onValue(offerRef, callback);
   unsubscribeFns.push(() => off(offerRef, "value", callback));
 }
-async function startCall(withVideo) {
+async function startCall(withVideo, shareScreen = false) {
   if (!isDataChannelOpen()) {
     alert("\u8BF7\u5148\u5EFA\u7ACB\u8FDE\u63A5");
     return;
   }
   try {
-    isVideoCall = withVideo;
-    updateCallStatus(withVideo ? "\u6B63\u5728\u83B7\u53D6\u6444\u50CF\u5934\u548C\u9EA6\u514B\u98CE\u6743\u9650..." : "\u6B63\u5728\u83B7\u53D6\u9EA6\u514B\u98CE\u6743\u9650...");
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
-    if (withVideo) {
-      showVideoUI();
+    if (shareScreen && !canShareScreen()) {
+      throw new Error("\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u5C4F\u5E55\u5171\u4EAB");
+    }
+    isScreenShare = shareScreen;
+    isVideoCall = withVideo || shareScreen;
+    if (shareScreen) {
+      updateCallStatus("\u6B63\u5728\u9009\u62E9\u5171\u4EAB\u5C4F\u5E55...");
+      localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      localStream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        if (isScreenShare) {
+          hangupCall(true);
+        }
+      }, { once: true });
+      showVideoUI(true, true);
+      els.localVideo.srcObject = localStream;
+    } else {
+      updateCallStatus(withVideo ? "\u6B63\u5728\u83B7\u53D6\u6444\u50CF\u5934\u548C\u9EA6\u514B\u98CE\u6743\u9650..." : "\u6B63\u5728\u83B7\u53D6\u9EA6\u514B\u98CE\u6743\u9650...");
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+      if (withVideo) {
+        showVideoUI(false, true);
+        els.localVideo.srcObject = localStream;
+      }
+    }
+    if (isVideoCall) {
       els.localVideo.srcObject = localStream;
     }
     callPc = createPeerConnection("call", "callerCandidates");
     setupCallPeerConnection(callPc);
     localStream.getTracks().forEach((track) => callPc.addTrack(track, localStream));
+    setCallControlsActive();
     await remove(ref(db, `rooms/${activeRoomId}/call`));
     await set(ref(db, `rooms/${activeRoomId}/call`), {
       active: true,
-      type: withVideo ? "video" : "audio",
+      type: shareScreen ? "screen" : withVideo ? "video" : "audio",
       startedBy: uid,
       startedAt: serverTimestamp()
     });
@@ -11337,11 +11364,12 @@ async function startCall(withVideo) {
       await callPc.setRemoteDescription(new RTCSessionDescription(answer));
     });
     listenForCandidates(`rooms/${activeRoomId}/call/calleeCandidates`, callPc);
-    updateCallStatus(withVideo ? "\u6B63\u5728\u53D1\u8D77\u89C6\u9891\u901A\u8BDD..." : "\u6B63\u5728\u53D1\u8D77\u8BED\u97F3\u901A\u8BDD...");
-    addChatMessage("\u7CFB\u7EDF", withVideo ? "\u6B63\u5728\u53D1\u8D77\u89C6\u9891\u901A\u8BDD..." : "\u6B63\u5728\u53D1\u8D77\u8BED\u97F3\u901A\u8BDD...");
+    const callText = shareScreen ? "\u5C4F\u5E55\u5171\u4EAB" : withVideo ? "\u89C6\u9891\u901A\u8BDD" : "\u8BED\u97F3\u901A\u8BDD";
+    updateCallStatus(`\u6B63\u5728\u53D1\u8D77${callText}...`);
+    addChatMessage("\u7CFB\u7EDF", `\u6B63\u5728\u53D1\u8D77${callText}...`);
   } catch (err) {
     console.error("\u65E0\u6CD5\u53D1\u8D77\u901A\u8BDD:", err);
-    alert("\u65E0\u6CD5\u83B7\u53D6\u5A92\u4F53\u6743\u9650\u6216\u53D1\u8D77\u901A\u8BDD\uFF0C\u8BF7\u68C0\u67E5\u6D4F\u89C8\u5668\u8BBE\u7F6E");
+    alert(`\u65E0\u6CD5\u53D1\u8D77\u901A\u8BDD: ${err.message}`);
     updateCallStatus("");
     cleanupCall(false);
   }
@@ -11353,15 +11381,22 @@ async function answerIncomingCall(targetRoomId) {
   const callData = callSnap.val();
   if (!callData || !callData.offer) return;
   if (callData.startedBy === uid) return;
-  isVideoCall = callData.type === "video";
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoCall });
-  if (isVideoCall) {
-    showVideoUI();
+  isScreenShare = callData.type === "screen";
+  isVideoCall = callData.type === "video" || isScreenShare;
+  if (isScreenShare) {
+    localStream = null;
+    showVideoUI(true, false);
+  } else {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoCall });
+  }
+  if (isVideoCall && !isScreenShare) {
+    showVideoUI(false, true);
     els.localVideo.srcObject = localStream;
   }
   callPc = createPeerConnection("call", "calleeCandidates");
   setupCallPeerConnection(callPc);
-  localStream.getTracks().forEach((track) => callPc.addTrack(track, localStream));
+  localStream?.getTracks().forEach((track) => callPc.addTrack(track, localStream));
+  setCallControlsActive();
   await callPc.setRemoteDescription(new RTCSessionDescription(callData.offer));
   const answer = await callPc.createAnswer();
   await callPc.setLocalDescription(answer);
@@ -11372,19 +11407,16 @@ function setupCallPeerConnection(pc) {
   pc.ontrack = (event) => {
     const [remoteStream] = event.streams;
     if (isVideoCall) {
+      showVideoUI(isScreenShare, false);
       els.remoteVideo.srcObject = remoteStream;
-      updateCallStatus("\u89C6\u9891\u901A\u8BDD\u4E2D");
-      addChatMessage("\u7CFB\u7EDF", "\u89C6\u9891\u901A\u8BDD\u5DF2\u5EFA\u7ACB");
+      updateCallStatus(isScreenShare ? "\u5C4F\u5E55\u5171\u4EAB\u4E2D" : "\u89C6\u9891\u901A\u8BDD\u4E2D");
+      addChatMessage("\u7CFB\u7EDF", isScreenShare ? "\u5C4F\u5E55\u5171\u4EAB\u5DF2\u5EFA\u7ACB" : "\u89C6\u9891\u901A\u8BDD\u5DF2\u5EFA\u7ACB");
     } else {
       els.remoteAudio.srcObject = remoteStream;
       updateCallStatus("\u8BED\u97F3\u901A\u8BDD\u4E2D");
       addChatMessage("\u7CFB\u7EDF", "\u8BED\u97F3\u901A\u8BDD\u5DF2\u5EFA\u7ACB");
     }
-    els.callBtn.disabled = true;
-    els.videoCallBtn.disabled = true;
-    els.hangupBtn.disabled = false;
-    els.muteBtn.disabled = false;
-    els.toggleVideoBtn.disabled = !isVideoCall;
+    setCallControlsActive();
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed") {
@@ -11413,6 +11445,7 @@ async function cleanupCall(clearRemoteSignal) {
   hideVideoUI();
   els.callBtn.disabled = !isDataChannelOpen();
   els.videoCallBtn.disabled = !isDataChannelOpen();
+  els.shareScreenBtn.disabled = !isDataChannelOpen() || !canShareScreen();
   els.hangupBtn.disabled = true;
   els.muteBtn.disabled = true;
   els.toggleVideoBtn.disabled = true;
@@ -11423,6 +11456,7 @@ async function cleanupCall(clearRemoteSignal) {
   isMuted = false;
   isVideoEnabled = true;
   isVideoCall = false;
+  isScreenShare = false;
   updateCallStatus("");
   if (clearRemoteSignal && activeRoomId) {
     await remove(ref(db, `rooms/${activeRoomId}/call`)).catch((err) => console.error("\u6E05\u7406\u901A\u8BDD\u4FE1\u4EE4\u5931\u8D25:", err));
@@ -11444,6 +11478,7 @@ function cleanupConnection(keepHostRoom) {
   els.sendBtn.disabled = true;
   els.callBtn.disabled = true;
   els.videoCallBtn.disabled = true;
+  els.shareScreenBtn.disabled = true;
   if (keepHostRoom && roomId) {
     createHostRoom(roomId).catch((err) => {
       console.error("\u91CD\u5EFA\u623F\u95F4\u5931\u8D25:", err);
@@ -11493,11 +11528,32 @@ function getLocalUid() {
   localStorage.setItem(storageKey, nextUid);
   return nextUid;
 }
-function showVideoUI() {
+function showVideoUI(screenMode = false, sharingLocal = false) {
   els.videoContainer.style.display = "flex";
+  els.localVideoWrapper.style.display = screenMode && !sharingLocal ? "none" : "";
+  els.localVideo.classList.toggle("screen-video", screenMode);
+  els.remoteVideo.classList.toggle("screen-video", screenMode);
+  els.localVideoLabel.textContent = screenMode && sharingLocal ? "\u5171\u4EAB\u5C4F\u5E55" : "\u6211";
+  els.remoteVideoLabel.textContent = screenMode ? "\u5BF9\u65B9\u5C4F\u5E55" : "\u5BF9\u65B9";
 }
 function hideVideoUI() {
   els.videoContainer.style.display = "none";
+  els.localVideoWrapper.style.display = "";
+  els.localVideo.classList.remove("screen-video");
+  els.remoteVideo.classList.remove("screen-video");
+  els.localVideoLabel.textContent = "\u6211";
+  els.remoteVideoLabel.textContent = "\u5BF9\u65B9";
+}
+function canShareScreen() {
+  return Boolean(navigator.mediaDevices?.getDisplayMedia);
+}
+function setCallControlsActive() {
+  els.callBtn.disabled = true;
+  els.videoCallBtn.disabled = true;
+  els.shareScreenBtn.disabled = true;
+  els.hangupBtn.disabled = false;
+  els.muteBtn.disabled = !localStream?.getAudioTracks().length;
+  els.toggleVideoBtn.disabled = !isVideoCall || isScreenShare;
 }
 function updateCallStatus(text) {
   els.callStatus.textContent = text;
@@ -11531,6 +11587,9 @@ els.callBtn.addEventListener("click", () => {
 });
 els.videoCallBtn.addEventListener("click", () => {
   startCall(true);
+});
+els.shareScreenBtn.addEventListener("click", () => {
+  startCall(false, true);
 });
 els.hangupBtn.addEventListener("click", () => {
   hangupCall(true);
